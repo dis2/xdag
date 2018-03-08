@@ -1,5 +1,8 @@
 /* база хостов, T13.714-T13.841 $DVS:time$ */
 
+// todo: repurpose ex-whitelisting (now seed) to automatically include long-connected peers
+// and peers which announce most recent blocks (=is best connected)
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,10 +19,10 @@
 
 #define MAX_SELECTED_HOSTS  64
 #define MAX_BLOCKED_IPS     64
-#define MAX_WHITE_IPS       64
+#define MAX_SEED_IPS       64
 #define MAX_ALLOWED_FROM_IP 4
 #define DATABASE            (g_xdag_testnet ? "netdb-testnet.txt" : "netdb.txt")
-#define DATABASEWHITE       (g_xdag_testnet ? "netdb-white-testnet.txt" : "netdb-white.txt")
+#define DATABASESEED       (g_xdag_testnet ? "netdb-seed-testnet.txt" : "netdb-seed.txt")
 
 enum host_flags {
 	HOST_OUR        = 1,
@@ -27,7 +30,7 @@ enum host_flags {
 	HOST_SET        = 4,
 	HOST_INDB       = 8,
 	HOST_NOT_ADD    = 0x10,
-	HOST_WHITE      = 0x20,
+	HOST_SEED      = 0x20,
 };
 
 struct host {
@@ -52,8 +55,8 @@ static struct host *selected_hosts[MAX_SELECTED_HOSTS], *our_host;
 static unsigned n_selected_hosts = 0;
 
 /* blocked ip for incoming connections and their number */
-uint32_t *g_xdag_blocked_ips, *g_xdag_white_ips;
-int g_xdag_n_blocked_ips = 0, g_xdag_n_white_ips = 0;
+uint32_t *g_xdag_blocked_ips, *g_xdag_seed_ips;
+int g_xdag_n_blocked_ips = 0, g_xdag_n_seed_ips = 0;
 
 static struct host *find_add_host(struct host *h)
 {
@@ -81,9 +84,9 @@ static struct host *find_add_host(struct host *h)
 		}
 	}
 
-	if (h->flags & HOST_WHITE) {
-		if (g_xdag_n_white_ips < MAX_WHITE_IPS) {
-			g_xdag_white_ips[g_xdag_n_white_ips++] = h0->ip;
+	if (h->flags & HOST_SEED) {
+		if (g_xdag_n_seed_ips < MAX_SEED_IPS) {
+			g_xdag_seed_ips[g_xdag_n_seed_ips++] = h0->ip;
 		}
 	}
 
@@ -92,6 +95,7 @@ static struct host *find_add_host(struct host *h)
 	return h0;
 }
 
+// Mask filters out hosts which NOT to connect
 static struct host *random_host(int mask)
 {
 	struct ldus_rbtree *r, *p = 0;
@@ -235,15 +239,10 @@ static void *monitor_thread(void *arg)
 			if (!h) continue;
 
 			if (n < MAX_SELECTED_HOSTS) {
-				for (j = 0; j < g_xdag_n_white_ips; ++j) {
-					if (h->ip == g_xdag_white_ips[j]) {
-						sprintf(str, "connect %u.%u.%u.%u:%u", h->ip & 0xff, h->ip >> 8 & 0xff, h->ip >> 16 & 0xff, h->ip >> 24 & 0xff, h->port);
-						xdag_debug("Netdb : host=%lx flags=%x query='%s'", (long)h, h->flags, str);
-						xdag_net_command(str, (f ? f : stderr));
-						n++;
-						break;
-					}
-				}
+				sprintf(str, "connect %u.%u.%u.%u:%u", h->ip & 0xff, h->ip >> 8 & 0xff, h->ip >> 16 & 0xff, h->ip >> 24 & 0xff, h->port);
+				xdag_debug("Netdb : host=%lx flags=%x query='%s'", (long)h, h->flags, str);
+				xdag_net_command(str, (f ? f : stderr));
+				n++;
 			}
 
 			h->flags |= HOST_CONNECTED;
@@ -253,9 +252,9 @@ static void *monitor_thread(void *arg)
 
 		if (f) fclose(f);
 		
-		g_xdag_n_white_ips = 0;
+		g_xdag_n_seed_ips = 0;
 		
-		read_database(DATABASEWHITE, HOST_WHITE);
+		read_database(DATABASESEED, HOST_SEED);
 
 		while (time(0) - t < 67) {
 			sleep(1);
@@ -275,15 +274,15 @@ int xdag_netdb_init(const char *our_host_str, int npairs, const char **addr_port
 	int i;
 
 	g_xdag_blocked_ips = malloc(MAX_BLOCKED_IPS * sizeof(uint32_t));
-	g_xdag_white_ips = malloc(MAX_WHITE_IPS * sizeof(uint32_t));
+	g_xdag_seed_ips = malloc(MAX_SEED_IPS * sizeof(uint32_t));
 	
-	if (!g_xdag_blocked_ips || !g_xdag_white_ips) return -1;
+	if (!g_xdag_blocked_ips || !g_xdag_seed_ips) return -1;
 	
 	if (read_database(DATABASE, HOST_INDB) < 0) {
 		xdag_fatal("Can't find file '%s'\n", DATABASE); return -1;
 	}
 	
-	read_database(DATABASEWHITE, HOST_WHITE);
+	read_database(DATABASESEED, HOST_SEED);
 	
 	our_host = find_add_ipport(&h, our_host_str, HOST_OUR | HOST_SET);
 

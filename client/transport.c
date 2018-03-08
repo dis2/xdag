@@ -218,6 +218,8 @@ static int block_arrive_callback(void *packet, void *connection)
 	return res;
 }
 
+// called by dnet when accepting an incoming peer. 'port' is mostly meaningless number,
+// as its their source tcp port
 static int conn_open_check(void *conn, uint32_t ip, uint16_t port)
 {
 	int i;
@@ -226,11 +228,7 @@ static int conn_open_check(void *conn, uint32_t ip, uint16_t port)
 		if (ip == g_xdag_blocked_ips[i]) return -1;
 	}
 
-	for (i = 0; i < g_xdag_n_white_ips; ++i) {
-		if (ip == g_xdag_white_ips[i]) return 0;
-	}
-
-	return -1;
+	return 0;
 }
 
 static void conn_close_notify(void *conn)
